@@ -1,0 +1,9 @@
+#Depencies 
+node_modules/
+
+#security
+.env
+
+#Hardhat compilation files
+artifacts/
+cache
