@@ -21,9 +21,21 @@ contract LandSaleEscrow {
 
         // This is the current owner of the land.
         address owner;
+
+        //buyer address - starts with no buye yet
+        address buyer;
+
+        //price of the land - it should be zero initially
+        uint price;
+
+        //shows whether land is currently for sale
+        bool isForSale;
+
+        //shows whether land has already been sold 
+        bool isSold;
     }
 
-    // This array stores all registered lands.
+    // This array stores all registered lands -
     Land[] public lands;
 
     // This mapping checks whether a land ID already exists.
@@ -32,11 +44,43 @@ contract LandSaleEscrow {
     // This mapping stores where each land ID is located inside the lands array.
     mapping(uint => uint) public landIndexById;
 
+    // Stores land IDs owned by each address.
+    mapping(address => uint[]) public ownerToLandIds;
+
+    // Error used when a non-registrar tries to do registrar-only work.
+    error NotRegistrar();
+
+    // Error used when someone tries to register the same land ID twice.
+    error LandAlreadyExists();
+
+    // Event emitted when land is registered.
+    event LandRegistered(
+        uint indexed landId,
+        string plotNumber,
+        string location,
+        address indexed owner
+    );
+
     // This constructor runs only once when the contract is deployed.
     constructor() {
         // msg.sender is the address deploying the contract, so that address becomes registrar.
+        // the registrar is the one deployer
         registrar = msg.sender;
     }
+
+    //modifier that allows only the registrat to continue
+    modifier onlyRegistrar()
+    {
+        //if caller is not registrar, stop.
+        if (msg.sender != registrar)
+        {
+            revert NotRegistrar();
+        }
+
+        //continue running the main function
+        _;
+    }
+
 
     // This function registers a new land record.
     function registerLand(
@@ -44,7 +88,12 @@ contract LandSaleEscrow {
         string calldata plotNumber,
         string calldata location,
         address firstOwner
-    ) external {
+    ) external onlyRegistrar {
+        // Stop if this land ID already exists.
+        if (landExistsById[landId]) {
+            revert LandAlreadyExists();
+        }
+        
         // Save that this land ID now exists.
         landExistsById[landId] = true;
 
@@ -57,9 +106,19 @@ contract LandSaleEscrow {
                 landId: landId,
                 plotNumber: plotNumber,
                 location: location,
-                owner: firstOwner
+                price:0,
+                owner: firstOwner,
+                buyer: address(0),
+                isForSale: false,
+                isSold: false
             })
         );
+
+        // Add this land ID to the owner's list.
+        ownerToLandIds[firstOwner].push(landId);
+
+        // Emit an event to show that land was registered.
+        emit LandRegistered(landId, plotNumber, location, firstOwner);
     }
 
     // This function reads how many lands are registered.
