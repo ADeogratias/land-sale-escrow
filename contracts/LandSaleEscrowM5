@@ -1,99 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// Interface tells LandSaleEscrow how to call LandHistory.
-// It only includes the function we need.
-interface ILandHistory {
-    function recordTransfer(
-        uint landId,
-        address oldOwner,
-        address newOwner
-    ) external;
-}
-
-// This base contract stores registrar logic.
-// Both LandHistory and LandSaleEscrow reuse it through inheritance.
-contract RegistrarAccess {
+contract LandSaleEscrow {
     address public registrar;
 
-    error NotRegistrar();
-
-    constructor() {
-        registrar = msg.sender;
-    }
-
-    modifier onlyRegistrar() {
-        if (msg.sender != registrar) {
-            revert NotRegistrar();
-        }
-        _;
-    }
-}
-
-// This contract records ownership transfer history.
-contract LandHistory is RegistrarAccess {
-    struct TransferRecord {
-        uint landId;
-        address oldOwner;
-        address newOwner;
-        uint timestamp;
-        uint blockNumber;
-    }
-
-    TransferRecord[] public records;
-
-    mapping(address => bool) public approvedWriters;
-
-    error NotApprovedWriter();
-
-    event WriterApprovalChanged(address indexed writer, bool approved);
-
-    event TransferRecorded(
-        uint indexed landId,
-        address indexed oldOwner,
-        address indexed newOwner
-    );
-
-    modifier onlyApprovedWriter() {
-        if (!approvedWriters[msg.sender]) {
-            revert NotApprovedWriter();
-        }
-        _;
-    }
-
-    // Registrar approves which contract can record history.
-    function setApprovedWriter(address writer, bool approved) external onlyRegistrar {
-        approvedWriters[writer] = approved;
-
-        emit WriterApprovalChanged(writer, approved);
-    }
-
-    // Approved writer records transfer history.
-    function recordTransfer(
-        uint landId,
-        address oldOwner,
-        address newOwner
-    ) external onlyApprovedWriter {
-        records.push(
-            TransferRecord({
-                landId: landId,
-                oldOwner: oldOwner,
-                newOwner: newOwner,
-                timestamp: block.timestamp,
-                blockNumber: block.number
-            })
-        );
-
-        emit TransferRecorded(landId, oldOwner, newOwner);
-    }
-
-    function getRecordCount() external view returns (uint) {
-        return records.length;
-    }
-}
-
-// Main escrow contract.
-contract LandSaleEscrow is RegistrarAccess {
     struct Land {
         uint landId;
         string plotNumber;
@@ -111,9 +21,7 @@ contract LandSaleEscrow is RegistrarAccess {
     mapping(uint => uint) public landIndexById;
     mapping(address => uint[]) public ownerToLandIds;
 
-    // This variable stores the address of the history contract using its interface.
-    ILandHistory public landHistory;
-
+    error NotRegistrar();
     error LandAlreadyExists();
     error LandDoesNotExist();
     error NotLandOwner();
@@ -132,9 +40,15 @@ contract LandSaleEscrow is RegistrarAccess {
     event LandPurchaseStarted(uint indexed landId, address indexed buyer, uint amount);
     event LandSaleApproved(uint indexed landId, address indexed oldOwner, address indexed newOwner, uint price);
 
-    // Constructor receives the address of LandHistory.
-    constructor(address landHistoryAddress) {
-        landHistory = ILandHistory(landHistoryAddress);
+    constructor() {
+        registrar = msg.sender;
+    }
+
+    modifier onlyRegistrar() {
+        if (msg.sender != registrar) {
+            revert NotRegistrar();
+        }
+        _;
     }
 
     modifier landMustExist(uint landId) {
@@ -234,40 +148,51 @@ contract LandSaleEscrow is RegistrarAccess {
 
         emit LandPurchaseStarted(landId, msg.sender, msg.value);
     }
-
+    
+    // Registrar approves the sale.
     function approveSale(uint landId) external onlyRegistrar landMustExist(landId) {
         uint index = landIndexById[landId];
         Land storage land = lands[index];
 
+        // There must be a buyer waiting.
         if (land.buyer == address(0)) {
             revert NoPendingBuyer();
         }
 
+        // Save important values before changing state.
         address oldOwner = land.owner;
         address newOwner = land.buyer;
         uint salePrice = land.price;
 
+        // Update land ownership.
         land.owner = newOwner;
+
+        // Mark land as sold and no longer for sale.
         land.isSold = true;
         land.isForSale = false;
+
+        // Reset buyer field because sale is complete.
         land.buyer = address(0);
 
+        // Add land to new owner's list.
         ownerToLandIds[newOwner].push(landId);
+
+        // Remove land from old owner's list.
         _removeLandFromOwner(oldOwner, landId);
 
-        // This is the contract-to-contract call.
-        // LandSaleEscrow tells LandHistory to record this transfer.
-        landHistory.recordTransfer(landId, oldOwner, newOwner);
-
+        // Send ETH to old owner/seller.
         (bool success, ) = payable(oldOwner).call{value: salePrice}("");
 
+        // Stop if payment fails.
         if (!success) {
             revert PaymentTransferFailed();
         }
 
+        // Emit event showing the sale is complete.
         emit LandSaleApproved(landId, oldOwner, newOwner, salePrice);
     }
 
+    // Internal helper function to remove land from previous owner.
     function _removeLandFromOwner(address owner, uint landId) internal {
         uint[] storage ownerLands = ownerToLandIds[owner];
 
