@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: MIT
+// This license line tells people how this code can be reused.
+
+pragma solidity ^0.8.20;
+// This tells Solidity to compile this file using version 0.8.20 or compatible 0.8.x versions.
+
+contract LandSaleEscrow {
+    // This variable stores the address of the registrar/admin.
+    address public registrar;
+
+    // This struct groups all important details about one land plot.
+    struct Land {
+        // This is the unique land ID.
+        uint landId;
+
+        // This is the human-readable plot number, for example "KGL-001".
+        string plotNumber;
+
+        // This is the human-readable location, for example "Kigali, Gasabo".
+        string location;
+
+        // This is the current owner of the land.
+        address owner;
+
+        //buyer address - starts with no buye yet
+        address buyer;
+
+        //price of the land - it should be zero initially
+        uint price;
+
+        //shows whether land is currently for sale
+        bool isForSale;
+
+        //shows whether land has already been sold 
+        bool isSold;
+    }
+
+    // This array stores all registered lands -
+    Land[] public lands;
+
+    // This mapping checks whether a land ID already exists.
+    mapping(uint => bool) public landExistsById;
+
+    // This mapping stores where each land ID is located inside the lands array.
+    mapping(uint => uint) public landIndexById;
+
+    // Stores land IDs owned by each address.
+    mapping(address => uint[]) public ownerToLandIds;
+
+    // Error used when a non-registrar tries to do registrar-only work.
+    error NotRegistrar();
+
+    // Error used when someone tries to register the same land ID twice.
+    error LandAlreadyExists();
+
+    error LandDoesNotExist();
+    error NotLandOwner();
+    error PriceMustBeAboveZero();
+    error LandAlreadySold();
+
+    // Event emitted when land is registered.
+    event LandRegistered(
+        uint indexed landId,
+        string plotNumber,
+        string location,
+        address indexed owner
+    );
+
+    // Event emitted when land is listed for sale.
+    event LandListedForSale(
+        uint indexed landId,
+        uint price
+    );
+
+    // This constructor runs only once when the contract is deployed.
+    constructor() {
+        // msg.sender is the address deploying the contract, so that address becomes registrar.
+        // the registrar is the one deployer
+        registrar = msg.sender;
+    }
+
+    //modifier that allows only the registrat to continue
+    modifier onlyRegistrar()
+    {
+        //if caller is not registrar, stop.
+        if (msg.sender != registrar)
+        {
+            revert NotRegistrar();
+        }
+
+        //continue running the main function
+        _;
+    }
+
+    // Checks that land exists before the function continues.
+    modifier landMustExist(uint landId) {
+        if (!landExistsById[landId]) {
+            revert LandDoesNotExist();
+        }
+        _;
+    }
+
+    // Checks that caller owns the land.
+    modifier onlyLandOwner(uint landId) {
+        uint index = landIndexById[landId];
+
+        if (lands[index].owner != msg.sender) {
+            revert NotLandOwner();
+        }
+        _;
+    }
+
+
+    // This function registers a new land record.
+    function registerLand(
+        uint landId,
+        string calldata plotNumber,
+        string calldata location,
+        address firstOwner
+    ) external onlyRegistrar {
+        // Stop if this land ID already exists.
+        if (landExistsById[landId]) {
+            revert LandAlreadyExists();
+        }
+        
+        // Save that this land ID now exists.
+        landExistsById[landId] = true;
+
+        // Save the position where this land will be stored in the array.
+        landIndexById[landId] = lands.length;
+
+        // Add the new land record into the lands array.
+        lands.push(
+            Land({
+                landId: landId,
+                plotNumber: plotNumber,
+                location: location,
+                price:0,
+                owner: firstOwner,
+                buyer: address(0),
+                isForSale: false,
+                isSold: false
+            })
+        );
+
+        // Add this land ID to the owner's list.
+        ownerToLandIds[firstOwner].push(landId);
+
+        // Emit an event to show that land was registered.
+        emit LandRegistered(landId, plotNumber, location, firstOwner);
+    }
+
+    // Owner lists land for sale.
+    function listLandForSale(
+        uint landId,
+        uint price
+    ) external landMustExist(landId) onlyLandOwner(landId) {
+        // Price cannot be zero.
+        if (price == 0) {
+            revert PriceMustBeAboveZero();
+        }
+
+        // Get the land position in the array.
+        uint index = landIndexById[landId];
+
+        // storage means changes update the blockchain state.
+        Land storage land = lands[index];
+
+        // Sold land cannot be listed again.
+        if (land.isSold) {
+            revert LandAlreadySold();
+        }
+
+        // Save price.
+        land.price = price;
+
+        // Mark land as available for sale.
+        land.isForSale = true;
+
+        // Emit event.
+        emit LandListedForSale(landId, price);
+    }
+
+    // This function reads how many lands are registered.
+    function getLandCount() external view returns (uint) {
+        // Return the number of items in the lands array.
+        return lands.length;
+    }
+}
+
