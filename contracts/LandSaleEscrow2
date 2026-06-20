@@ -4,6 +4,7 @@
 pragma solidity ^0.8.20;
 // This tells Solidity to compile this file using version 0.8.20 or compatible 0.8.x versions.
 
+
 contract LandSaleEscrow {
     // This variable stores the address of the registrar/admin.
     address public registrar;

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+
+
 // Interface tells LandSaleEscrow how to call LandHistory.
 // It only includes the function we need.
 interface ILandHistory {
